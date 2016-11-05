@@ -2,7 +2,6 @@
 BIN := nginx/objs/nginx
 CONF := $(shell pwd)/nginx.conf
 WORKDIR := /tmp/nginx_workdir
-CFLAGS := 
 
 SOURCES := ngx_http_hash_visitor_module.c
 
@@ -18,6 +17,9 @@ nginx/Makefile:
 
 clean:
 	cd nginx && make clean
+
+$(WORKDIR):
+	mkdir -p $(WORKDIR)/logs
 
 run_local: $(BIN) $(WORKDIR)
 	$(BIN) -c $(CONF) -p $(WORKDIR)
