@@ -8,7 +8,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-
+static const ngx_str_t  unknwn = ngx_string("unknown value");
 static char *ngx_http_hash_visitor(ngx_conf_t *cf, ngx_command_t *cmd,
                                    void *conf);
 
@@ -57,59 +57,96 @@ ngx_module_t  ngx_http_hash_visitor_module = {
     NGX_MODULE_V1_PADDING
 };
 
-static ngx_str_t  unknwn = ngx_string("unknown value");
+/** Hash a ngx_str_t */
+static ngx_uint_t
+hash_str(ngx_uint_t key, const ngx_str_t* s)
+{
+    for (unsigned i=0; i<s->len; ++i) {
+        key = ngx_hash(key, s->data[i]);
+    }
+    return key;
+}
+
+/** Macro for fetching headers with ngx_table_elt and hashing */
+#define DECLARE_HEADER_HASH_ITEM_TABLE_ELT(hdrname) \
+    const ngx_str_t* hdrname = hdrs_in->hdrname ? &hdrs_in->hdrname->value : &unknwn; \
+    hash = hash_str(hash, hdrname);
+
+/** Macro for fetching headers with ngx_str_t and hashing */
+#define DECLARE_HEADER_HASH_ITEM_STR(hdrname) \
+    ngx_str_t* hdrname = &hdrs_in->hdrname; \
+    hash = hash_str(hash, hdrname);
 
 /** Read headers_in and generate a hash from headers of interest */
 static int
-ngx_http_hash_visitor_calc(ngx_http_headers_in_t *headers_in, 
-                           unsigned char* buf, 
+ngx_http_hash_visitor_calc(ngx_http_headers_in_t *hdrs_in,
+                           unsigned char* buf,
                            size_t buf_len)
 {
     unsigned char* end;
+    ngx_uint_t hash = 0;
 
-    ngx_str_t* host  = headers_in->host ? &headers_in->host->value : &unknwn;
-    ngx_str_t* agent = headers_in->user_agent ? &headers_in->user_agent->value : &unknwn;
+    // Fetch and hash headers using DECLARE_HEADER_HASH_ITEM_... macro
+    DECLARE_HEADER_HASH_ITEM_TABLE_ELT(host)
+    DECLARE_HEADER_HASH_ITEM_TABLE_ELT(user_agent)
+    DECLARE_HEADER_HASH_ITEM_STR(user)
+#if (NGX_HTTP_REALIP)
+    DECLARE_HEADER_HASH_ITEM(real_ip)
+#endif
 #if (NGX_HTTP_X_FORWARDED_FOR)
-    ngx_str_t* x_fwd = &unknwn;
-    // TODO: Transform forwarded_for (ngx_array_t) to ngx_str_t
-    /*if (headers_in->forwarded_for) {*/
-        /*headers_in->forwarded_for->value*/
+    // Handle x_forwarded_for manually since it is not a ngx_str_t
+    // but a ngx_array_t
+    // TODO: Transform forwarded_for (ngx_array_t) to ngx_str_t.
+    //       Implementation below is unnecessarily complex
+    const ngx_str_t *x_fwd = &unknwn;
+    /*ngx_array_t* fwd_arr = &hdrs_in->x_forwarded_for;*/
+    // // Create comma-separated string from fwd_arr.
+    // // Allocate string for nelts*size bytes + 2*(nelds-1) bytes
+    // // for ", " (comma + space) for pretty print.
+    /*size_t num_bytes = fwd_arr->nelts * fwd_arr->size \*/
+                       /*+ 2*(fwd_arr->nelts-1);*/
+    /*unsigned char* x_fwd_buf[num_bytes];*/
+    /*ngx_str_t x_fwd = ngx_string(x_fwd_buf);*/
+
+    /*size_t idx = 0;*/
+    /*for (ngx_uint_t el=0;el<fwd_arr->nelts;++el) {*/
+        /*for (size_t i=0; i<fwd_arr->size; ++i) {*/
+            /*x_fwd_buf[idx] = fwd_arr->elts[idx];*/
+            /*idx += 1;*/
+        /*}*/
+        /*x_fwd_buf[idx] = ',';*/
+        /*idx += 1;*/
+        /*x_fwd_buf[idx] = ' ';*/
+        /*idx += 1;*/
     /*}*/
+#else
+    const ngx_str_t *x_fwd = &unknwn;
 #endif
-#if (NGX_HTTP_REALIP)
-    ngx_str_t* rl_ip = headers_in->real_ip ? &headers_in->real_ip->value : &unknwn;
-#endif
+    hash = hash_str(hash, x_fwd);
 
-    end = ngx_snprintf(buf, buf_len, 
+    // Now format body-string, specifying variables used in hash and hash
+    // itself.
+    end = ngx_snprintf(buf, buf_len,
         "Headers used for hash:\n"
-        "host: \t%V\n"
-        "user_agent: \t%V\n"
-        /*": \t%V\n"*/
-#if (NGX_HTTP_X_FORWARDED_FOR)
-        "x_forwarded_for: \t%V\n"
-#endif
+        "host: \t\"%V\"\n"
+        "user_agent: \t\"%V\"\n"
+        "user: \t\"%V\"\n"
+        "x_forwarded_for: \t\"%V\"\n"
 #if (NGX_HTTP_REALIP)
-        "x_real_ip: \t%V\n"
+        "x_real_ip: \t\"%V\"\n"
 #endif
+        "\n"
+        "Hash becomes %d\n"
         , host
-        , agent
-#if (NGX_HTTP_X_FORWARDED_FOR)
+        , user_agent
+        , user
         , x_fwd
-#endif
 #if (NGX_HTTP_REALIP)
         , rl_ip
 #endif
+        , hash
         );
     return end - buf;
-    
-    /**user_agent;*/
-/*#if (NGX_HTTP_X_FORWARDED_FOR)*/
-    /*ngx_array_t x_forwarded_for;*/
-/*#endif*/
-/*#if (NGX_HTTP_REALIP)*/
-    /*ngx_table_elt_t *x_real_ip;*/
-/*#endif*/
-
 }
 
 static ngx_int_t
@@ -122,7 +159,7 @@ ngx_http_hash_visitor_handler(ngx_http_request_t *r)
 
     r->headers_out.status = NGX_HTTP_OK;
     // TODO: Should we do content-length? Or send header early?
-    /*r->headers_out.content_length_n = ngx_http_sample_text.len;*/
+    /*r->headers_out.content_length_n = ... */
 
     rc = ngx_http_send_header(r);
 
@@ -145,12 +182,14 @@ ngx_http_hash_visitor_handler(ngx_http_request_t *r)
     if (buf == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-    body_size = ngx_http_hash_visitor_calc(&r->headers_in, buf, buf_len);
+    body_size = ngx_http_hash_visitor_calc(&r->headers_in,
+                                           buf,
+                                           buf_len);
     if (body_size <= 0) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, 
-                  "body_size %d bytes", body_size);
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                  "body_size %d bytes\n", body_size);
 
     b->start = b->pos = buf;
     b->end = b->last = buf + body_size;
@@ -159,21 +198,6 @@ ngx_http_hash_visitor_handler(ngx_http_request_t *r)
     b->last_in_chain = 1;
 
     return ngx_http_output_filter(r, &out);
-
-    /** Simpler version, ngx_http_send_response handles most work */
-    /*ngx_http_complex_value_t  cv;*/
-
-    /*if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD))) {*/
-        /*return NGX_HTTP_NOT_ALLOWED;*/
-    /*}*/
-
-    /*ngx_memzero(&cv, sizeof(ngx_http_complex_value_t));*/
-
-    /*cv.value.len = sizeof(ngx_hash_visitor);*/
-    /*cv.value.data = ngx_hash_visitor;*/
-    /*r->headers_out.last_modified_time = 23349600;*/
-
-    /*return ngx_http_send_response(r, NGX_HTTP_OK, &ngx_http_gif_type, &cv);*/
 }
 
 

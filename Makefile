@@ -6,7 +6,7 @@ CFLAGS :=
 
 SOURCES := ngx_http_hash_visitor_module.c
 
-.PHONY: all clean run_local reload restart debug_core
+.PHONY: all clean run_local reload restart debug_coredump httperf
 
 all: $(BIN)
 
@@ -14,7 +14,7 @@ $(BIN): nginx/Makefile $(SOURCES)
 	cd nginx && make
 
 nginx/Makefile: 
-	cd nginx && ./auto/configure --add-module=.. --with-debug
+	cd nginx && ./auto/configure --add-module=..  #--with-debug
 
 clean:
 	cd nginx && make clean
@@ -31,5 +31,13 @@ restart: $(BIN)
 	sleep 1
 	$(MAKE) run_local
 
-debug_core:
+debug_coredump:
 	gdb $(BIN) $(WORKDIR)/core
+
+httperf:
+	httperf --server 127.0.0.1 \
+			--uri "/hash" \
+			--port 8080 \
+			--num-conns=10000
+
+
