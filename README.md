@@ -17,6 +17,16 @@ Simple test:
 make run_local
 curl 127.0.0.1:8080/hash --user-agent client3
 ```
+outputs
+```
+Headers used for hash:
+host:   "127.0.0.1:8080"
+user_agent:     "client3"
+user:   ""
+x_forwarded_for:        "unknown value"
+
+Hash becomes -377004896
+```
 
 Design
 ======
