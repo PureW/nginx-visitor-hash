@@ -9,6 +9,7 @@ Build
 
 Compile Nginx with VisitorHash:
 ```
+git submodule update
 make
 ```
 
